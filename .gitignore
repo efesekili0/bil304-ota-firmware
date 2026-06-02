@@ -1,0 +1,4 @@
+contiki-ng/*
+!contiki-ng/examples/
+contiki-ng/examples/*
+!contiki-ng/examples/ota-firmware/
