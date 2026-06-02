@@ -165,10 +165,9 @@ Cooja simülasyonunda 129KB veriyi direkt Z1'in hafızasına gömemeyeceğimiz i
 `buf[i] = (uint8_t)((offset + i) % 256u);`
 Böylece verinin aktarımı tamamen simüle edilmiş oldu.
 
----
-
 ## 6. Projeyi Derleme ve Çalıştırma
 
+Projeyi derlemek ve güncel `.z1` dosyalarını üretmek için (Linux/Mac):
 ```bash
 cd contiki-ng/examples/ota-firmware
 make TARGET=z1 clean
@@ -181,12 +180,16 @@ udp-server.z1:  text=47485 B  data=536 B  bss=5768 B   (ROM'un %89.7'si dolu)
 udp-client.z1:  text=47775 B  data=536 B  bss=5800 B   (ROM'un %90.3'ü dolu)
 ```
 
-Cooja simülasyonunu başlatmak için:
+### 6.1 Cooja Simülasyonunu Başlatma
+
+Cooja'yı başlatmak için (modern Gradle yapısıyla):
 ```bash
-java -jar contiki-ng/tools/cooja/dist/cooja.jar contiki-ng/examples/ota-firmware/BIL304-OS-Project-1.csc
+cd contiki-ng/tools/cooja
+./gradlew run
 ```
 
----
+**Cooja açıldıktan sonra:** 
+Üst menüden `File > Open Simulation > Browse` tıklayarak `contiki-ng/examples/ota-firmware/BIL304-OS-Project-1.csc` dosyasını seçin. Simülasyon açılır → Start düğmesine basılır → Log ekranında OTA bloklarının akışını ve en sonda `"Global checksum dogrulandi"` + `"Yuklenmeye hazir yeni firmware alimi tamamlandi."` mesajlarını görmek gerekmektedir.
 
 ## 7. Araştırma Görevi (ELF Analizi)
 
