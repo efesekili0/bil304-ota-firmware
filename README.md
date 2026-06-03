@@ -7,15 +7,16 @@
 
 ---
 
-## 🎥 Demo Videosu
+## Video
 
-> **YouTube:** `[VIDEO LİNKİ BURAYA EKLENECEKTİR]`
+> **YouTube:*`https://youtu.be/KzUl4f29UxI`
+> ELF analizine gitmek için repo linki: `https://github.com/efesekili0/ota-toolchain-anaysis`
 
 Videoda Cooja simülasyonunu, Stop-and-Wait veri aktarımını, checksum denetimimizi ve yazdığımız algoritmaların terminaldeki çıktılarını detaylıca anlattık.
 
 ---
 
-## 📁 Proje Yapısı
+## Proje Yapısı
 
 ```
 twota/
@@ -63,7 +64,7 @@ typedef struct {
     uint16_t block_id;
     uint8_t  data_len;
     uint16_t checksum;
-} __attribute__((packed)) ota_header_t;
+}ota_header_t;
 ```
 
 **Matematiksel Boyutlar:**
@@ -81,21 +82,20 @@ IoT cihazlarında (Z1 Mote) çok az RAM olduğu için aynı anda onlarca paketi 
 Gönderici bir bloğu yollar ve sayacı başlatır (biz 2 saniye verdik). Alıcıdan onay (ACK) gelmeden asla yeni bloğa geçmez. Eğer ACK yolda kaybolursa, süresi dolan gönderici aynı bloğu tekrar yollar.
 
 ```c
-while(!transfer_done) {
-    if(!waiting_for_ack && bytes_sent < FIRMWARE_SIZE) {
-        send_ota_block();
+while(bytes_sent < TOTAL_FW_SIZE) {
+    if(!waiting_for_ack) {
+      send_ota_block();
     }
 
     PROCESS_WAIT_EVENT();
 
-    if(ev == PROCESS_EVENT_TIMER && etimer_expired(&retransmit_timer)) {
-        if(waiting_for_ack && bytes_sent < FIRMWARE_SIZE) {
-            global_cksum = cksum_before_block;
-            waiting_for_ack = false;
-            send_ota_block();
-        }
+    if(ev == PROCESS_EVENT_TIMER && etimer_expired(&timer)) {
+      if(waiting_for_ack) {
+        printf("OTA: Timeout! Retransmitting block %u...\n", current_block);
+        send_ota_block();
+      }
     }
-}
+  }
 ```
 
 Alıcı tarafı da sadece beklediği sıra numarası (`expected_block`) gelirse veriyi kabul ediyor. Eğer zaten aldığı bir blok tekrar gelirse (gönderici ACK alamayıp tekrar yolladıysa), alıcı veriyi ikinci kez yazmıyor ama göndericinin ilerlemesi için ACK'yı tekrar yolluyor.
@@ -121,20 +121,19 @@ Havadaki radyo gürültüsünden dolayı verinin bozulma ihtimaline karşı bir 
 Normalde MD5 veya CRC32 çok daha güçlüdür ama MSP430 işlemcisini inanılmaz yorar ve pili tüketir. Bu yüzden biz CPU'yu en az yoran **Aritmetik Byte-Toplam** yöntemini tercih ettik. Fonksiyon sadece byte'ları topluyor ve 16-bit taşmasını otomatik avantaja çeviriyor:
 
 ```c
-static uint16_t block_checksum(const uint8_t *data, uint8_t len) {
-    uint16_t s = 0;
-    uint8_t  i;
-    for(i = 0; i < len; i++) {
-        s += data[i];
-    }
-    return s;
+static uint16_t calculate_checksum(const uint8_t *data, uint8_t len) {
+  uint16_t sum = 0;
+  for(int i = 0; i < len; i++) {
+    sum += data[i];
+  }
+  return sum;
 }
 ```
 
 Alıcı bu toplam değerini, gelen veri üzerinden kendi hesapladığı değerle karşılaştırıyor. Eğer uyuşmazlık varsa paketi reddedip onay yollamıyor, böylece gönderici bir süre sonra paketi tekrar iletiyor.
 
 ```c
-calc_cksum = block_checksum(payload, hdr.data_len);
+calc_cksum = calculate_checksum(payload, hdr.data_len);
 if(calc_cksum != hdr.checksum) {
     printf("OTA RX: [HATA] Blok %u checksum hatasi! beklenen=0x%04x hesaplanan=0x%04x\n",
            hdr.block_id, hdr.checksum, calc_cksum);
@@ -154,18 +153,19 @@ if(calculated_global_cksum == hdr.checksum) {
 ```
 
 ---
+## 6. Projemizin gömülü sistemler üzerinde nasıl çalıştığına dair temel teknik soruların yanıtları aşağıdadır:
 
-## 5. Önemli Tasarım Kararları
+Çalışan İmaj Nerede? Ana firmware, Flash belleğin başlangıç adresinde yer alır.
 
-### 5.1 Neden Dosya Sistemi (CFS) Kullanmadık?
-Contiki'nin Coffee File System (CFS) kütüphanesi çok fazla bellek kaplıyor (yaklaşık 45KB). Z1 Mote'un 52KB olan ROM'una bizim yazdığımız ağ kodlarıyla beraber bunu sığdırmamız imkansızdı. Şartnamedeki izne dayanarak, blokların gelişini sayaçla ve global checksum ile bellekte sanal olarak doğrulama yöntemini seçtik. 
+Yeni İmaj Nereye Yazılır? Veri, Contiki'nin CFS (Coffee File System) aracılığıyla Flash'taki özel bir "staging" (geçici depolama) alanına yazılır.
 
-### 5.2 Deterministic Firmware Üretimi
-Cooja simülasyonunda 129KB veriyi direkt Z1'in hafızasına gömemeyeceğimiz için iki tarafta da aynı mantıkla çalışan matematiksel bir formül yazdık:
-`buf[i] = (uint8_t)((offset + i) % 256u);`
-Böylece verinin aktarımı tamamen simüle edilmiş oldu.
+Aynı Anda İki İmaj Saklanabilir mi? Flash kapasitesi uygunsa "Dual-Bank" yapısı ile saklanabilir. Kapasite kısıtlıysa mevcut imajın üzerine yazılmadan önce yeni imaj doğrulanır.
 
-## 6. Projeyi Derleme ve Çalıştırma
+Aktivasyon Nasıl Yapılır? İndirme tamamlanıp doğrulama (CRC) geçildikten sonra sistem yeniden başlatılır. Bootloader, staging alanındaki veriyi ana kod bölgesine kopyalar (swap) ve yeni imajı başlatır.
+
+Flash Yazma İşlemi Çalışan İmajı Etkiler mi? Write-While-Read kısıtları nedeniyle, aktif kod ile veri alanı farklı bölümlerde tutulur. Böylece yazma işlemi çalışan sistemde kilitlenmeye yol açmaz.
+
+## 7. Projeyi Derleme ve Çalıştırma
 
 Projeyi derlemek ve güncel `.z1` dosyalarını üretmek için (Linux/Mac):
 ```bash
@@ -180,7 +180,7 @@ udp-server.z1:  text=47485 B  data=536 B  bss=5768 B   (ROM'un %89.7'si dolu)
 udp-client.z1:  text=47775 B  data=536 B  bss=5800 B   (ROM'un %90.3'ü dolu)
 ```
 
-### 6.1 Cooja Simülasyonunu Başlatma
+### 7.1 Cooja Simülasyonunu Başlatma
 
 Cooja'yı başlatmak için (modern Gradle yapısıyla):
 ```bash
@@ -191,8 +191,6 @@ cd contiki-ng/tools/cooja
 **Cooja açıldıktan sonra:** 
 Üst menüden `File > Open Simulation > Browse` tıklayarak `contiki-ng/examples/ota-firmware/BIL304-OS-Project-1.csc` dosyasını seçin. Simülasyon açılır → Start düğmesine basılır → Log ekranında OTA bloklarının akışını ve en sonda `"Global checksum dogrulandi"` + `"Yuklenmeye hazir yeni firmware alimi tamamlandi."` mesajlarını görmek gerekmektedir.
 
-## 7. Araştırma Görevi (ELF Analizi)
+## 8. Araştırma Görevi (ELF Analizi)
 
 Bu projenin derlenmiş `new-firmware.z1` ELF dosyasının terminal üzerinden bellek, sembol ve mimari analizi yapılmış olup, teslim şablonu olarak belirlenen repoya fork'lanarak eklenmiştir.
-
-> ELF analizine gitmek için repo linki: `[FORKLANAN REPO LİNKİ BURAYA EKLENECEKTİR]`
